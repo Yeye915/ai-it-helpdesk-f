@@ -1,71 +1,297 @@
 {
-  "name": "WF09 - Audit Log",
+  "name": "WF09 - Audit Log - 12 Steps",
   "nodes": [
     {
+      "id": "9678d155-cd59-48b0-acf5-e1f3dfc27f90",
+      "name": "01 - Receive Ticket",
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "9734a5ee-9916-48fa-8b64-161b239f0481",
       "parameters": {
         "httpMethod": "POST",
         "path": "audit-log",
         "responseMode": "responseNode",
         "options": {}
-      },
-      "id": "b2d04e12-20ac-4167-a710-8d3af9cfba20",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      }
+    },
+    {
+      "id": "c7ec6773-364a-4299-a9da-6a02dc2ab207",
+      "name": "02 - Normalize Webhook Data",
       "position": [
-        0,
+        300,
         0
       ],
-      "webhookId": "9734a5ee-9916-48fa-8b64-161b239f0481"
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{json:{...$json,auditLog:{event:'ticket.processed',ticketId:$json.ticketId,processedAt:new Date().toISOString(),workflowTrace:[...($json.workflowTrace??[]),'WF09']},processingComplete:true}}];"
-      },
-      "id": "4dd06f9c-87e3-4117-b299-f0462aa6752a",
-      "name": "Process Ticket",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        240,
-        0
-      ]
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\n// Recover ticket fields from a normal webhook body or legacy nested webhook bodies.\nconst allowed = ['ticketId','title','description','category','priority','assignedTeam','status','createdAt','aiReason','aiSuggestion','suggestedResponse','deduplication','alert','sla','actor'];\nconst layers = [];\nlet value = input;\nfor (let depth = 0; depth < 16; depth++) {\n  if (typeof value === 'string') value = JSON.parse(value);\n  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Ticket payload must be a JSON object');\n  layers.push(value);\n  if (!Object.prototype.hasOwnProperty.call(value, 'body')) break;\n  value = value.body;\n  if (depth === 15) throw new Error('Webhook body nesting is too deep');\n}\nconst ticket = {};\nconst trace = [];\nfor (const layer of layers.reverse()) {\n  for (const key of allowed) if (Object.prototype.hasOwnProperty.call(layer, key)) ticket[key] = layer[key];\n  if (Array.isArray(layer.workflowTrace)) for (const entry of layer.workflowTrace) {\n    if (typeof entry === 'string' && entry.length <= 80 && !trace.includes(entry)) trace.push(entry);\n  }\n}\nticket.workflowTrace = trace.slice(-32);\nreturn [{ json: ticket }];"
+      }
     },
     {
+      "id": "5f9bf20c-d541-4ea2-b621-ec531e5bebf8",
+      "name": "03 - Validate Ticket",
+      "position": [
+        600,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst ticket = { ...input };\nif (typeof ticket.ticketId !== 'string' || !ticket.ticketId.trim() || ticket.ticketId.length > 100) throw new Error('ticketId is required and must be at most 100 characters');\nticket.ticketId = ticket.ticketId.trim();\nfor (const key of ['title','description','category','priority','status','assignedTeam','aiReason','aiSuggestion','suggestedResponse']) {\n  if (ticket[key] !== undefined && typeof ticket[key] !== 'string') throw new Error(key + ' must be a string');\n}\nif (ticket.title && ticket.title.length > 200) throw new Error('title is too long');\nif (ticket.description && ticket.description.length > 10000) throw new Error('description is too long');\nreturn [{ json: ticket }];"
+      }
+    },
+    {
+      "id": "37fb2566-b5b8-4c9e-9cf2-c0c2a126562d",
+      "name": "04 - Extract Actor",
+      "position": [
+        900,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst source = input.actor;\nconst actor = { type: 'system' };\nif (source && typeof source === 'object' && !Array.isArray(source)) {\n  for (const key of ['id','name']) if (typeof source[key] === 'string') actor[key] = source[key].slice(0,200);\n  if (actor.id) actor.type = 'user';\n}\nreturn [{ json: { ...input, actor } }];"
+      }
+    },
+    {
+      "id": "b8379464-8753-4237-9ec4-589654ee25d0",
+      "name": "05 - Select Ticket Snapshot",
+      "position": [
+        1200,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst snapshot = { ticketId: input.ticketId };\nfor (const key of ['title','category','priority','status','assignedTeam','createdAt']) if (input[key] !== undefined) snapshot[key] = input[key];\nreturn [{ json: { ...input, _auditSnapshot: snapshot } }];"
+      }
+    },
+    {
+      "id": "d7145052-9199-4d8e-9a33-0b39e09659bf",
+      "name": "06 - Summarize Alert",
+      "position": [
+        1500,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst source = input.alert;\nconst summary = { present: Boolean(source && typeof source === 'object') };\nif (summary.present) {\n  summary.required = source.required === true;\n  summary.sent = source.sent === true;\n  summary.status = typeof source.status === 'string' ? source.status : 'unknown';\n}\nreturn [{ json: { ...input, _auditAlert: summary } }];"
+      }
+    },
+    {
+      "id": "3c0ac141-2df5-4575-8f52-d03b7079b6c1",
+      "name": "07 - Summarize SLA",
+      "position": [
+        1500,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst source = input.sla;\nconst summary = { present: Boolean(source && typeof source === 'object') };\nif (summary.present) {\n  summary.breached = source.breached === true;\n  summary.escalationSent = source.escalationSent === true;\n  if (Number.isFinite(source.targetHours)) summary.targetHours = source.targetHours;\n  if (typeof source.dueAt === 'string' && Number.isFinite(new Date(source.dueAt).getTime())) summary.dueAt = new Date(source.dueAt).toISOString();\n  if (typeof source.state === 'string') summary.state = source.state;\n}\nreturn [{ json: { ...input, _auditSla: summary } }];"
+      }
+    },
+    {
+      "id": "ad7db007-04fb-4577-9b2b-d52f116e5ade",
+      "name": "08 - Append Workflow Trace",
+      "position": [
+        1200,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst workflowTrace = [...(input.workflowTrace ?? [])];\nif (!workflowTrace.includes('WF09')) workflowTrace.push('WF09');\nreturn [{ json: { ...input, workflowTrace } }];"
+      }
+    },
+    {
+      "id": "529b8fad-055b-450b-b7a6-bd183d0571d9",
+      "name": "09 - Build Audit Event",
+      "position": [
+        900,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst processedAt = new Date().toISOString();\nconst auditLog = {\n  event: 'ticket.processed',\n  eventId: 'ticket.processed:' + input.ticketId + ':' + String($execution.id),\n  ticketId: input.ticketId,\n  processedAt,\n  actor: input.actor,\n  ticket: input._auditSnapshot,\n  alert: input._auditAlert,\n  sla: input._auditSla,\n  workflowTrace: [...input.workflowTrace],\n  persisted: false,\n  storageStatus: 'not_configured'\n};\nreturn [{ json: { ...input, auditLog } }];"
+      }
+    },
+    {
+      "id": "07c99b6f-8266-469b-94d1-02000460f690",
+      "name": "10 - Validate Audit Event",
+      "position": [
+        600,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst event = input.auditLog;\nif (!event || event.event !== 'ticket.processed' || event.ticketId !== input.ticketId || !event.eventId) throw new Error('Invalid audit event identity');\nif (!Number.isFinite(new Date(event.processedAt).getTime())) throw new Error('Invalid audit timestamp');\nif (!event.workflowTrace.includes('WF09') || event.persisted !== false) throw new Error('Invalid audit completion metadata');\nreturn [{ json: input }];"
+      }
+    },
+    {
+      "id": "0df8baf2-c601-4f31-9c45-f09220dd87cc",
+      "name": "11 - Build Final Response",
+      "position": [
+        300,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst { _auditSnapshot, _auditAlert, _auditSla, ...ticket } = input;\nreturn [{ json: { ...ticket, processingComplete: true } }];"
+      }
+    },
+    {
+      "id": "2f7a9798-dde0-446c-8c01-3f7aaeb0d8c2",
+      "name": "12 - Respond",
+      "position": [
+        0,
+        350
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}",
         "options": {
           "responseCode": 200
         }
-      },
-      "id": "c4af94c6-4c6b-4079-8557-9a439552856f",
-      "name": "Respond",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        500,
-        0
-      ]
+      }
     }
   ],
   "connections": {
-    "Webhook": {
+    "01 - Receive Ticket": {
       "main": [
         [
           {
-            "node": "Process Ticket",
+            "node": "02 - Normalize Webhook Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Process Ticket": {
+    "02 - Normalize Webhook Data": {
       "main": [
         [
           {
-            "node": "Respond",
+            "node": "03 - Validate Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 - Validate Ticket": {
+      "main": [
+        [
+          {
+            "node": "04 - Extract Actor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 - Extract Actor": {
+      "main": [
+        [
+          {
+            "node": "05 - Select Ticket Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 - Select Ticket Snapshot": {
+      "main": [
+        [
+          {
+            "node": "06 - Summarize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 - Summarize Alert": {
+      "main": [
+        [
+          {
+            "node": "07 - Summarize SLA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 - Summarize SLA": {
+      "main": [
+        [
+          {
+            "node": "08 - Append Workflow Trace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 - Append Workflow Trace": {
+      "main": [
+        [
+          {
+            "node": "09 - Build Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 - Build Audit Event": {
+      "main": [
+        [
+          {
+            "node": "10 - Validate Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 - Validate Audit Event": {
+      "main": [
+        [
+          {
+            "node": "11 - Build Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 - Build Final Response": {
+      "main": [
+        [
+          {
+            "node": "12 - Respond",
             "type": "main",
             "index": 0
           }
@@ -78,10 +304,7 @@
     "executionOrder": "v1",
     "saveManualExecutions": true
   },
-  "versionId": "dbb71f02-3688-4720-bd15-bbc01d6a0de0",
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
+  "versionId": "4d60c73c-d4b8-4e01-b4a4-f0f4e877c071",
   "tags": [
     {
       "name": "HelpDeskAI"

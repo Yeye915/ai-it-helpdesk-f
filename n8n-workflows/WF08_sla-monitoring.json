@@ -1,37 +1,144 @@
 {
-  "name": "WF08 - SLA Monitoring",
+  "name": "WF08 - SLA Monitoring - 12 Steps",
   "nodes": [
     {
+      "id": "c978cac1-070f-4994-b5a1-0a330d2dfd90",
+      "name": "01 - Receive Ticket",
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "285729cc-2f0e-4bd4-9319-d4d0a995ca5b",
       "parameters": {
         "httpMethod": "POST",
         "path": "sla-monitoring",
         "responseMode": "responseNode",
         "options": {}
-      },
-      "id": "42a1e96e-d770-4806-a380-fb6ff5c2b5b9",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      }
+    },
+    {
+      "id": "cae8fb59-67ed-4452-ae46-44c3d24f724c",
+      "name": "02 - Normalize Webhook Data",
       "position": [
-        0,
+        300,
         0
       ],
-      "webhookId": "285729cc-2f0e-4bd4-9319-d4d0a995ca5b"
-    },
-    {
-      "parameters": {
-        "jsCode": "const hours={High:4,Medium:24,Low:72};\nconst created=new Date($json.createdAt??Date.now());\nconst due=new Date(created.getTime()+(hours[$json.priority]??24)*3600000);\nreturn [{json:{...$json,sla:{targetHours:hours[$json.priority]??24,dueAt:due.toISOString(),breached:Date.now()>due.getTime()},workflowTrace:[...($json.workflowTrace??[]),'WF08']}}];"
-      },
-      "id": "46309679-bd00-4ce4-a63c-a3ddac41b35c",
-      "name": "Process Ticket",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        240,
-        0
-      ]
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\n// Recover ticket fields from a normal webhook body or legacy nested webhook bodies.\nconst allowed = ['ticketId','title','description','category','priority','assignedTeam','status','createdAt','aiReason','aiSuggestion','suggestedResponse','deduplication','alert','sla','actor'];\nconst layers = [];\nlet value = input;\nfor (let depth = 0; depth < 16; depth++) {\n  if (typeof value === 'string') value = JSON.parse(value);\n  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Ticket payload must be a JSON object');\n  layers.push(value);\n  if (!Object.prototype.hasOwnProperty.call(value, 'body')) break;\n  value = value.body;\n  if (depth === 15) throw new Error('Webhook body nesting is too deep');\n}\nconst ticket = {};\nconst trace = [];\nfor (const layer of layers.reverse()) {\n  for (const key of allowed) if (Object.prototype.hasOwnProperty.call(layer, key)) ticket[key] = layer[key];\n  if (Array.isArray(layer.workflowTrace)) for (const entry of layer.workflowTrace) {\n    if (typeof entry === 'string' && entry.length <= 80 && !trace.includes(entry)) trace.push(entry);\n  }\n}\nticket.workflowTrace = trace.slice(-32);\nreturn [{ json: ticket }];"
+      }
     },
     {
+      "id": "5f9c1c15-0e2d-4ffa-a2b4-f2b155b84fcb",
+      "name": "03 - Validate Ticket",
+      "position": [
+        600,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst ticket = { ...input };\nif (typeof ticket.ticketId !== 'string' || !ticket.ticketId.trim() || ticket.ticketId.length > 100) throw new Error('ticketId is required and must be at most 100 characters');\nticket.ticketId = ticket.ticketId.trim();\nfor (const key of ['title','description','category','priority','status','assignedTeam','aiReason','aiSuggestion','suggestedResponse']) {\n  if (ticket[key] !== undefined && typeof ticket[key] !== 'string') throw new Error(key + ' must be a string');\n}\nif (ticket.title && ticket.title.length > 200) throw new Error('title is too long');\nif (ticket.description && ticket.description.length > 10000) throw new Error('description is too long');\nreturn [{ json: ticket }];"
+      }
+    },
+    {
+      "id": "4c1a7bd3-9c62-4a3b-9e13-cfa97f2eef37",
+      "name": "04 - Apply SLA Policy",
+      "position": [
+        900,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst names = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };\nconst raw = String(input.priority ?? 'Medium').trim().toLowerCase();\nif (!Object.prototype.hasOwnProperty.call(names, raw)) throw new Error('priority must be Critical, High, Medium, or Low');\nreturn [{ json: { ...input, priority: names[raw], sla: { targetHours: ({ Critical: 1, High: 4, Medium: 24, Low: 72 })[names[raw]] } } }];"
+      }
+    },
+    {
+      "id": "cbdd9b40-9f7a-4ce8-ac35-cedc281137e8",
+      "name": "05 - Resolve Creation Time",
+      "position": [
+        1200,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst source = input.createdAt == null ? 'received_at' : 'ticket_created_at';\nconst created = input.createdAt == null ? new Date() : new Date(input.createdAt);\nif (!Number.isFinite(created.getTime())) throw new Error('createdAt must be a valid date');\nconst statusNames = { open: 'Open', 'in progress': 'In Progress', resolved: 'Resolved' };\nconst status = statusNames[String(input.status ?? 'Open').trim().toLowerCase()];\nif (!status) throw new Error('status must be Open, In Progress, or Resolved');\nreturn [{ json: { ...input, status, createdAt: created.toISOString(), sla: { ...input.sla, createdAtSource: source } } }];"
+      }
+    },
+    {
+      "id": "ea3e2d22-77f6-4c85-b8dd-9eb63b01a0e2",
+      "name": "06 - Calculate SLA Deadline",
+      "position": [
+        1500,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst due = new Date(new Date(input.createdAt).getTime() + input.sla.targetHours * 3600000);\nreturn [{ json: { ...input, sla: { ...input.sla, dueAt: due.toISOString() } } }];"
+      }
+    },
+    {
+      "id": "d9de96aa-9481-4cda-ab81-315a7b6ef1d1",
+      "name": "07 - Evaluate SLA Breach",
+      "position": [
+        1500,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst now = Date.now();\nconst due = new Date(input.sla.dueAt).getTime();\nconst resolved = input.status === 'Resolved';\nconst breached = !resolved && now > due;\nreturn [{ json: { ...input, sla: { ...input.sla, breached, state: resolved ? 'resolved' : breached ? 'overdue' : 'within_target', evaluatedAt: new Date(now).toISOString(), overdueMinutes: breached ? Math.ceil((now - due) / 60000) : 0 } } }];"
+      }
+    },
+    {
+      "id": "03f8e413-cb4c-4c8a-a7f8-b3fb29675038",
+      "name": "08 - Prepare Escalation Plan",
+      "position": [
+        1200,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nreturn [{ json: { ...input, sla: { ...input.sla, escalationRequired: input.sla.breached, escalationSent: false, escalationStatus: input.sla.breached ? 'pending_configuration' : 'not_required' } } }];"
+      }
+    },
+    {
+      "id": "e0d02375-e0c5-4ab0-94a8-2d5f8f438a9f",
+      "name": "09 - Append Workflow Trace",
+      "position": [
+        900,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst workflowTrace = [...(input.workflowTrace ?? [])];\nif (!workflowTrace.includes('WF08')) workflowTrace.push('WF08');\nreturn [{ json: { ...input, workflowTrace } }];"
+      }
+    },
+    {
+      "id": "44b458b9-8580-4251-9d6e-91c4a8b4a585",
+      "name": "10 - Call Audit Log",
+      "position": [
+        600,
+        350
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "parameters": {
         "method": "POST",
         "url": "http://localhost:5678/webhook/audit-log",
@@ -42,62 +149,156 @@
         "options": {
           "timeout": 10000
         }
-      },
-      "id": "410e9d8d-c9f9-4b74-9643-531f8314469b",
-      "name": "Call Next Workflow",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        500,
-        0
-      ]
+      }
     },
     {
+      "id": "9b2f01e8-178a-48ba-a6dd-6765a36987b4",
+      "name": "11 - Validate Downstream Result",
+      "position": [
+        300,
+        350
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst expectedTicketId = $('09 - Append Workflow Trace').first().json.ticketId;\nif (input.processingComplete !== true || !input.auditLog || typeof input.auditLog.eventId !== 'string') throw new Error('Downstream workflow did not return a completed audit event');\nif (input.ticketId !== expectedTicketId || input.auditLog.ticketId !== expectedTicketId) throw new Error('Downstream ticketId does not match the audit event');\nreturn [{ json: input }];"
+      }
+    },
+    {
+      "id": "74153026-5dce-4005-8011-a834deae9a09",
+      "name": "12 - Respond",
+      "position": [
+        0,
+        350
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}",
         "options": {
           "responseCode": 200
         }
-      },
-      "id": "b2aaab7d-1124-4aa6-a17b-4fa4e51a624a",
-      "name": "Respond",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        760,
-        0
-      ]
+      }
     }
   ],
   "connections": {
-    "Webhook": {
+    "01 - Receive Ticket": {
       "main": [
         [
           {
-            "node": "Process Ticket",
+            "node": "02 - Normalize Webhook Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Process Ticket": {
+    "02 - Normalize Webhook Data": {
       "main": [
         [
           {
-            "node": "Call Next Workflow",
+            "node": "03 - Validate Ticket",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Call Next Workflow": {
+    "03 - Validate Ticket": {
       "main": [
         [
           {
-            "node": "Respond",
+            "node": "04 - Apply SLA Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 - Apply SLA Policy": {
+      "main": [
+        [
+          {
+            "node": "05 - Resolve Creation Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 - Resolve Creation Time": {
+      "main": [
+        [
+          {
+            "node": "06 - Calculate SLA Deadline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 - Calculate SLA Deadline": {
+      "main": [
+        [
+          {
+            "node": "07 - Evaluate SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 - Evaluate SLA Breach": {
+      "main": [
+        [
+          {
+            "node": "08 - Prepare Escalation Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 - Prepare Escalation Plan": {
+      "main": [
+        [
+          {
+            "node": "09 - Append Workflow Trace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 - Append Workflow Trace": {
+      "main": [
+        [
+          {
+            "node": "10 - Call Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 - Call Audit Log": {
+      "main": [
+        [
+          {
+            "node": "11 - Validate Downstream Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 - Validate Downstream Result": {
+      "main": [
+        [
+          {
+            "node": "12 - Respond",
             "type": "main",
             "index": 0
           }
@@ -110,10 +311,7 @@
     "executionOrder": "v1",
     "saveManualExecutions": true
   },
-  "versionId": "2e903e1f-bffc-4316-8428-66d9e4550496",
-  "meta": {
-    "templateCredsSetupCompleted": true
-  },
+  "versionId": "ebeab37a-ed15-46c9-964d-0b7220ef1553",
   "tags": [
     {
       "name": "HelpDeskAI"

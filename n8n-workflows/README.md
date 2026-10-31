@@ -34,7 +34,9 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:5678/webhook/ticket-intake
 ## Quan trọng
 - Đây là bộ workflow khung chạy được với logic phân loại/ưu tiên dựa trên từ khóa, chưa phải AI/LLM thật.
 - WF05 chưa truy vấn MongoDB nên mới tạo fingerprint, chưa xác nhận trùng với ticket đã tồn tại.
-- WF07 đánh dấu ticket cần cảnh báo nhưng chưa gửi email/Discord/Slack vì chưa cấu hình credential/kênh nhận.
-- WF08 tính SLA khi ticket đi qua workflow; để giám sát định kỳ ticket đang mở, cần thêm Schedule Trigger + truy vấn MongoDB.
+- WF07, WF08 và WF09 hiện có **đúng 12 node mỗi workflow**. Xem [bảng 12 bước và hướng dẫn import](WF07-09-12-STEPS.md).
+- WF07 đánh dấu ticket High/Critical đang mở cần cảnh báo và soạn thông báo; chưa gửi email/Discord/Slack vì chưa tích hợp kênh nhận.
+- WF08 tính SLA khi ticket đi qua workflow: Critical 1h, High 4h, Medium 24h, Low 72h; bỏ đánh dấu quá hạn cho ticket Resolved. Để giám sát định kỳ ticket đang mở, cần thêm Schedule Trigger + truy vấn MongoDB.
+- WF09 tạo audit event với bản tổng hợp ticket/alert/SLA và trace đầy đủ; `persisted: false` vì chưa có bước lưu MongoDB.
 - Bộ này chưa tự ghi ticket vào MongoDB và chưa gọi ngược API website để cập nhật ticket. Cần tích hợp đúng với code dự án sau khi nhận ZIP.
 - Tất cả workflow import ở trạng thái inactive; bật thủ công sau khi kiểm tra URL.
