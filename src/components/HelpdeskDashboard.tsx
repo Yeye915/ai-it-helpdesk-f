@@ -626,7 +626,7 @@ export default function HelpdeskDashboard({ user }: { user: AuthUser }) {
             <div className="avatar">{initials}</div>
             <div className={`user-info ${styles.profileInfo}`}>
               <strong>{user.name}</strong>
-              <span>{user.email}</span>
+              <span>{user.role === "admin" ? "Quản trị viên" : "Nhân viên"}</span>
             </div>
             <LogoutButton />
           </div>

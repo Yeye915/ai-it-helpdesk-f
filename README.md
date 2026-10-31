@@ -59,6 +59,26 @@ npm run test:auth:browser
 
 Kiểm tra này dùng chế độ development, tự khởi động Next.js nếu cần và xác nhận trang đã đăng nhập không có lỗi console hoặc bảng lỗi Next.js khi mở trang hay tải lại. Nếu máy đã có Chromium, có thể đặt `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` để dùng trình duyệt đó.
 
+## Tạo tài khoản bằng script seed
+
+Script `scripts/seed-users.mjs` đọc `.env.local`. Cấu hình `MONGODB_URI`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `DEMO_USER_EMAIL` và `DEMO_USER_PASSWORD` trực tiếp trong file này. Có thể thêm `ADDITIONAL_USER_EMAIL`, `ADDITIONAL_USER_PASSWORD`, `ADDITIONAL_USER_NAME` cho một tài khoản bổ sung. Không commit các giá trị bí mật.
+
+`MONGODB_DB` chọn database, mặc định là `it_helpdesk`; kết nối của ứng dụng cũng dùng lựa chọn này. Dùng cùng giá trị cho ứng dụng và script seed.
+
+```bash
+npm run seed:users
+```
+
+Lệnh tạo hoặc cập nhật tên, vai trò và mật khẩu của các email được cấu hình; chạy khi bạn muốn cập nhật các tài khoản đó. Mật khẩu được băm theo định dạng `scrypt$salt$hash`. Đăng nhập hỗ trợ cả định dạng này và định dạng `salt:hash` của tài khoản cũ. Đăng ký công khai luôn tạo vai trò `user`; script seed có thể tạo `admin`. Vai trò được hiển thị trên dashboard; các tài khoản vẫn cùng dùng không gian ticket chung, chưa có giới hạn API theo vai trò.
+
+Giao diện dashboard từ file `page.tsx` được ghép tại `src/components/HelpdeskDashboard.tsx`; `src/app/page.tsx` giữ kiểm tra phiên phía server. Tên tài khoản và nút đăng xuất tiếp tục lấy theo phiên hiện tại.
+
+Kiểm tra script và đăng nhập với tài khoản kiểm thử trên MongoDB local, khi ứng dụng đang chạy:
+
+```bash
+node --env-file=.env.local --test tests/auth.test.mjs tests/seed-users.test.mjs
+```
+
 ## 3. Kết nối n8n (tùy chọn)
 1. Mở n8n.
 2. Import các file JSON trong `n8n-workflows/` (Import from File).

@@ -18,6 +18,8 @@ test("authenticated workspace has no Next.js prerender errors on navigation or r
   page.on("pageerror", (error) => errors.push(error.message));
 
   try {
+    await page.goto("/login");
+    await expect(page.locator("main")).toHaveCSS("display", "grid");
     const response = await page.request.post("/api/auth/register", {
       data: { name: "Kiểm tra prerender", email, password, confirmPassword: password },
     });
@@ -25,6 +27,8 @@ test("authenticated workspace has no Next.js prerender errors on navigation or r
 
     await page.goto("/", { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: /Xin chào, prerender/ })).toBeVisible();
+    await expect(page.locator(".user-info")).toContainText("Nhân viên");
+    await expect(page.getByRole("button", { name: "Đăng xuất", exact: true })).toBeVisible();
     expect(errors, "Next.js must not report errors after authenticated navigation").toEqual([]);
     await expect(page.getByRole("button", { name: "Open issues overlay" })).toHaveCount(0);
 

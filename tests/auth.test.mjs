@@ -11,7 +11,8 @@ const email = `auth-test-${runId}@example.test`;
 const otherEmail = `auth-race-${runId}@example.test`;
 const limitedEmail = `auth-limit-${runId}@example.test`;
 const password = randomBytes(20).toString("hex");
-const registration = { name: "Người dùng kiểm thử", email, password, confirmPassword: password };
+// Public registration must ignore an attempt to grant an admin role.
+const registration = { name: "Người dùng kiểm thử", email, password, confirmPassword: password, role: "admin" };
 const emails = [email, otherEmail, limitedEmail];
 let db;
 
@@ -75,7 +76,8 @@ test("MongoDB authentication lifecycle", async (t) => {
     const response = await request("/api/auth/register", { method: "POST", body: registration, origin: new URL(baseUrl).origin });
     assert.equal(response.status, 201);
     const data = await response.json();
-    assert.deepEqual(Object.keys(data.user).sort(), ["email", "id", "name"]);
+    assert.deepEqual(Object.keys(data.user).sort(), ["email", "id", "name", "role"]);
+    assert.equal(data.user.role, "user");
     assert.equal(data.user.email, email);
     const header = response.headers.get("set-cookie");
     assert.match(header, /HttpOnly/i);

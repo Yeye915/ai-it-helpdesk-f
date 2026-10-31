@@ -12,7 +12,6 @@ const globalWithMongoose = globalThis as typeof globalThis & {
     promise: Promise<typeof mongoose> | null;
   };
 };
-
 const cached = globalWithMongoose.mongoose ??= { conn: null, promise: null };
 
 async function connectDB() {
@@ -21,17 +20,17 @@ async function connectDB() {
   }
 
   if (!cached.promise) {
-    const opts = { bufferCommands: false };
-    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
-      return mongoose;
+    const opts = {
+      bufferCommands: false,
+      dbName: process.env.MONGODB_DB || 'it_helpdesk',
+    };
+    cached.promise = mongoose.connect(MONGODB_URI!, opts).catch((error) => {
+      // Let a later request retry instead of reusing a permanently rejected promise.
+      cached.promise = null;
+      throw error;
     });
   }
-  try {
-    cached.conn = await cached.promise;
-  } catch (error) {
-    cached.promise = null;
-    throw error;
-  }
+  cached.conn = await cached.promise;
   return cached.conn;
 }
 

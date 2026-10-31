@@ -12,14 +12,14 @@ const COOKIE_NAME = "helpmate_session";
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const DUMMY_HASH = `${"0".repeat(32)}:${"0".repeat(128)}`;
 
-export type AuthUser = { id: string; name: string; email: string };
+export type AuthUser = { id: string; name: string; email: string; role: "admin" | "user" };
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function publicUser(user: { _id: { toString(): string }; name: string; email: string }): AuthUser {
-  return { id: user._id.toString(), name: user.name, email: user.email };
+function publicUser(user: { _id: { toString(): string }; name: string; email: string; role?: string }): AuthUser {
+  return { id: user._id.toString(), name: user.name, email: user.email, role: user.role === "admin" ? "admin" : "user" };
 }
 
 export function authError(message: string, status: number) {
@@ -155,14 +155,19 @@ export async function handleCredentials(request: Request, mode: "login" | "regis
     if (mode === "register") {
       const salt = randomBytes(16).toString("hex");
       const key = (await deriveKey(password, salt, 64)) as Buffer;
-      const user = await User.create({ name, email, passwordHash: `${salt}:${key.toString("hex")}` });
+      const user = await User.create({ name, email, role: "user", passwordHash: `${salt}:${key.toString("hex")}` });
       return await createSession(publicUser(user), 201);
     }
 
     const user = await User.findOne({ email }).select("+passwordHash");
-    const [salt, storedKey] = (user?.passwordHash ?? DUMMY_HASH).split(":");
+    const passwordHash = user?.passwordHash ?? DUMMY_HASH;
+    const normalizedHash = passwordHash.startsWith("scrypt$")
+      ? passwordHash.slice(7).replace("$", ":")
+      : passwordHash;
+    const validHash = /^[a-f0-9]{32}:[a-f0-9]{128}$/.test(normalizedHash);
+    const [salt, storedKey] = (validHash ? normalizedHash : DUMMY_HASH).split(":");
     const key = (await deriveKey(password, salt, 64)) as Buffer;
-    if (!timingSafeEqual(key, Buffer.from(storedKey, "hex")) || !user) {
+    if (!timingSafeEqual(key, Buffer.from(storedKey, "hex")) || !user || !validHash) {
       return authError("Email hoặc mật khẩu không đúng.", 401);
     }
     return await createSession(publicUser(user));
