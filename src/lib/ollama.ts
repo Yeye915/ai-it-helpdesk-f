@@ -1,3 +1,4 @@
+// Nhi
 export type AIAnalysis = {
   category: string;
   priority: "Critical" | "High" | "Medium" | "Low";

@@ -1,3 +1,4 @@
+// Nhi
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITicket extends Document {
