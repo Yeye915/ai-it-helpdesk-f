@@ -40,3 +40,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:5678/webhook/ticket-intake
 - WF09 tạo audit event với bản tổng hợp ticket/alert/SLA và trace đầy đủ; `persisted: false` vì chưa có bước lưu MongoDB.
 - Bộ này chưa tự ghi ticket vào MongoDB và chưa gọi ngược API website để cập nhật ticket. Cần tích hợp đúng với code dự án sau khi nhận ZIP.
 - Tất cả workflow import ở trạng thái inactive; bật thủ công sau khi kiểm tra URL.
+
+## Bản tối ưu WF07–WF09
+
+Hướng dẫn hiện hành: [WF07-09-OPTIMIZED.md](WF07-09-OPTIMIZED.md). Mỗi luồng đúng 12 node. WF09 upsert audit vào MongoDB theo eventId; cần tạo index và chọn credential trước khi kích hoạt.

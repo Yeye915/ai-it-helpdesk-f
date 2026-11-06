@@ -36,7 +36,7 @@ function cookieOf(response) {
 
 before(async () => {
   await client.connect();
-  db = client.db();
+  db = client.db(process.env.MONGODB_DB || "it_helpdesk");
 });
 
 after(async () => {

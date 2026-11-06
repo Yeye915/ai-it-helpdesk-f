@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createOptimizedWorkflow } from '../scripts/optimized-workflows.mjs';
 
 const names = ["WF07_high-priority-alert.json", "WF08_sla-monitoring.json", "WF09_audit-log.json"];
 const workflows = names.map((name) => JSON.parse(readFileSync(new URL(`../n8n-workflows/${name}`, import.meta.url))));
+const stored = new Map();
 const now = Date.parse("2026-10-31T06:00:00.000Z");
 class Clock extends Date {
   constructor(...args) { super(...(args.length ? args : [now])); }
@@ -20,6 +24,11 @@ async function run(workflow, input, downstream) {
       const output = execute({ first: () => ({ json: data }) }, { id: "test-execution" }, (name) => ({ first: () => ({ json: outputs.get(name) }) }), Clock);
       assert.equal(output.length, 1, node.name);
       data = output[0].json;
+    } else if (node.type === 'n8n-nodes-base.mongoDb') {
+      assert.equal(node.parameters.operation, 'update');
+      assert.equal(node.parameters.updateKey, 'eventId');
+      assert.equal(node.parameters.upsert, true);
+      stored.set(data.eventId, structuredClone(data));
     } else if (node.type === "n8n-nodes-base.httpRequest") {
       if (!downstream) return data;
       data = await downstream(node, JSON.parse(JSON.stringify(data)));
@@ -120,14 +129,14 @@ test("WF08 handles overdue, exact deadline, resolved tickets and missing creatio
   assert.equal(missing.sla.createdAtSource, "received_at");
 });
 
-test("WF09 builds an auditable event without claiming persistence or copying credentials", async () => {
+test("WF09 builds an auditable event with MongoDB upsert confirmation and without copying credentials", async () => {
   const data = await run(workflows[2], { body: { ...ticket, actor: { id: "user-1", name: "Example", password: "private" }, passwordHash: "private", MONGODB_URI: "private", workflowTrace: ["WF07", "WF08"] } });
   assert.equal(data.processingComplete, true);
   assert.equal(data.auditLog.ticketId, ticket.ticketId);
   assert.equal(data.auditLog.event, "ticket.processed");
-  assert.equal(data.auditLog.eventId, `ticket.processed:${ticket.ticketId}:test-execution`);
-  assert.equal(data.auditLog.persisted, false);
-  assert.equal(data.auditLog.storageStatus, "not_configured");
+  assert.equal(data.auditLog.eventId, `ticket.processed:${ticket.ticketId}:Open:${ticket.createdAt}`);
+  assert.equal(data.auditLog.persisted, true);
+  assert.equal(data.auditLog.storageStatus, "stored");
   assert.deepEqual(data.workflowTrace, ["WF07", "WF08", "WF09"]);
   assert.deepEqual(data.auditLog.workflowTrace, data.workflowTrace);
   assert.deepEqual(data.auditLog.actor, { type: "user", id: "user-1", name: "Example" });
@@ -159,4 +168,38 @@ test("WF07 and WF08 reject incomplete or mismatched downstream responses", async
     await assert.rejects(run(workflow, ticket, async () => ({ processingComplete: false })), /completed audit/);
     await assert.rejects(run(workflow, ticket, async () => ({ ticketId: "TCK-OTHER", processingComplete: true, auditLog: { ticketId: "TCK-OTHER", eventId: "event" } })), /does not match/);
   }
+});
+
+
+test('WF09 uses a stable event key and preserves credential bindings when regenerated', async () => {
+  stored.clear();
+  const input = { ...ticket, eventId:'created:TCK-100001' };
+  await run(workflows[2], { body: input });
+  await run(workflows[2], { body: input });
+  assert.equal(stored.size, 1);
+  assert.equal(stored.get(input.eventId).auditLog.persisted, true);
+  const credentials = { mongoDb: { id:'local-test-binding',name:'MongoDB' } };
+  const generated = createOptimizedWorkflow('WF09', { nodes:[{type:'n8n-nodes-base.mongoDb',credentials}] });
+  assert.deepEqual(generated.nodes.find(node=>node.type==='n8n-nodes-base.mongoDb').credentials,credentials);
+});
+
+test('regeneration is repeatable and preserves workflows 1 through 6', () => {
+  const hash = (path) => createHash('sha256').update(readFileSync(new URL('../n8n-workflows/'+path,import.meta.url))).digest('hex');
+  const earlier = ['WF01_ticket-intake.json','WF02_ticket-classification.json','WF03_priority-assessment.json','WF04_team-assignment.json','WF05_duplicate-detection.json','WF06_support-response.json'];
+  const before = earlier.map(hash);
+  const optimized = names.map(hash);
+  for(let i=0;i<2;i++) execFileSync(process.execPath,['scripts/generate-n8n-workflows.mjs','--only=WF07,WF08,WF09'],{stdio:'pipe'});
+  assert.deepEqual(earlier.map(hash),before);
+  assert.deepEqual(names.map(hash),optimized);
+});
+
+test('workflow payload and trace growth are bounded before expensive processing', async () => {
+  for (const workflow of workflows) {
+    await assert.rejects(run(workflow, { ...ticket, aiSuggestion: 'x'.repeat(70000) }), /size limit/);
+  }
+  const result = await run(workflows[0], { ...ticket, workflowTrace: Array.from({ length: 10000 }, (_, index) => 'step-' + index) });
+  assert.ok(result.workflowTrace.length <= 33);
+  let nested = ticket;
+  for (let i = 0; i < 17; i++) nested = { body: nested };
+  await assert.rejects(run(workflows[0], nested), /nesting is too deep/);
 });

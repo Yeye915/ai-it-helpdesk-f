@@ -3,14 +3,14 @@
 Dự án gồm giao diện Next.js, API quản lý ticket, MongoDB và 9 workflow n8n.
 
 ## Yêu cầu
-- Node.js 20.9+ (khuyến nghị bản LTS)
+- Node.js 20.19+ (khuyến nghị bản LTS)
 - npm
 - MongoDB local hoặc MongoDB Atlas
 - n8n chỉ cần khi muốn chạy tự động hóa ticket
 
 ## 1. Cài đặt
 ```bash
-npm install
+npm ci
 ```
 
 Tạo file `.env.local` ở thư mục gốc bằng cách sao chép `.env.example`, sau đó chỉnh `MONGODB_URI` thành URI MongoDB của bạn.
@@ -108,3 +108,7 @@ Các workflow hiện được xuất ở trạng thái chưa kích hoạt. Hãy 
 
 ## Bảo mật
 File `.env.local` trong bản gốc có chứa thông tin kết nối cơ sở dữ liệu. Bản kết hợp này không kèm thông tin đó. Nếu thông tin đã được chia sẻ hoặc tải lên nơi công khai, hãy đổi mật khẩu database/thu hồi credential cũ và cập nhật URI mới trong `.env.local`.
+
+## Tối ưu hóa backend và WF07–WF09
+
+Xem [chi tiết backend](docs/BACKEND-OPTIMIZATION.md) và [12 bước mỗi workflow](n8n-workflows/WF07-09-OPTIMIZED.md). Chạy `npm run db:indexes` trên đúng database trước khi bật WF09 mới; import lại ba workflow và chọn credential MongoDB. API tiếp tục yêu cầu phiên đăng nhập. GET `/api/tickets` giữ toàn bộ danh sách cho dashboard hiện tại; thêm `?page=1` để dùng phân trang và thống kê.

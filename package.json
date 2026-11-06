@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test:auth:browser": "playwright test",
-    "seed:users": "node scripts/seed-users.mjs"
+    "seed:users": "node scripts/seed-users.mjs",
+    "db:indexes": "node scripts/ensure-indexes.mjs",
+    "test:backend": "node --import tsx --test tests/backend.test.mjs",
+    "test:workflows": "node --test tests/workflows.test.mjs"
   },
   "dependencies": {
     "mongodb": "^7.7.0",
@@ -26,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.23.15"
   }
 }
