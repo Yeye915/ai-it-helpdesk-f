@@ -203,3 +203,88 @@ test('workflow payload and trace growth are bounded before expensive processing'
   for (let i = 0; i < 17; i++) nested = { body: nested };
   await assert.rejects(run(workflows[0], nested), /nesting is too deep/);
 });
+
+const allNames = [
+  'WF01_ticket-intake.json', 'WF02_ticket-classification.json',
+  'WF03_priority-assessment.json', 'WF04_team-assignment.json',
+  'WF05_duplicate-detection.json', 'WF06_support-response.json', ...names,
+];
+const allWorkflows = allNames.map((name) => JSON.parse(readFileSync(new URL(`../n8n-workflows/${name}`, import.meta.url))));
+
+async function runFullChain(input) {
+  const execute = async (index, body) => run(allWorkflows[index], {
+    body: JSON.parse(JSON.stringify(body)),
+    headers: { authorization: 'SECRET_TEST_HEADER' },
+    query: {}, params: {},
+  }, async (node, next) => {
+    const target = allWorkflows[index + 1]?.nodes[0].parameters.path;
+    assert.equal(node.parameters.url, `http://localhost:5678/webhook/${target}`);
+    assert.equal(node.parameters.method, 'POST');
+    assert.equal(node.parameters.body, '={{ JSON.stringify($json) }}');
+    return execute(index + 1, next);
+  });
+  return execute(0, input);
+}
+
+test('all nine exports form one local chain with valid connected nodes', () => {
+  assert.equal(allWorkflows.length, 9);
+  const paths = new Set();
+  for (const workflow of allWorkflows) {
+    assert.equal(workflow.active, false);
+    assert.equal(workflow.nodes[0].parameters.responseMode, 'responseNode');
+    assert.ok(!paths.has(workflow.nodes[0].parameters.path));
+    paths.add(workflow.nodes[0].parameters.path);
+    for (const [index, node] of workflow.nodes.entries()) {
+      if (index < workflow.nodes.length - 1) assert.equal(workflow.connections[node.name].main[0][0].node, workflow.nodes[index + 1].name);
+      if (node.type === 'n8n-nodes-base.code') assert.equal(node.parameters.mode, 'runOnceForAllItems');
+      if (node.type === 'n8n-nodes-base.httpRequest') assert.ok(node.parameters.options.timeout >= 30000);
+    }
+  }
+});
+
+test('WF01 through WF09 preserve ticket identity across actual webhook envelope shapes', async () => {
+  const result = await runFullChain({ ...ticket, title: 'Wi-Fi outage', description: 'All users cannot work', eventId: 'full-chain-high' });
+  assert.equal(result.ticketId, ticket.ticketId);
+  assert.equal(result.category, 'Network');
+  assert.equal(result.priority, 'High');
+  assert.equal(result.assignedTeam, 'Network Support');
+  assert.deepEqual(result.workflowTrace, allNames.map((name) => name.slice(0, 4)));
+  assert.equal(result.alert.required, true);
+  assert.equal(result.alert.sent, false);
+  assert.equal(result.sla.targetHours, 4);
+  assert.equal(result.auditLog.persisted, true);
+  assert.equal(result.processingComplete, true);
+  assert.equal(result.deduplication.checked, false);
+  assert.equal(JSON.stringify(result).includes('SECRET_TEST_HEADER'), false);
+});
+
+test('full chain covers Vietnamese urgency, low priority, resolved tickets and repeat delivery', async () => {
+  for (const [id, description, status, priority, alert] of [
+    ['vietnamese', 'Mất mạng toàn công ty, không thể làm việc', 'Open', 'High', true],
+    ['low', 'minor question, when possible', 'Open', 'Low', false],
+    ['closed', 'urgent outage all users', 'Resolved', 'High', false],
+  ]) {
+    const input = { ...ticket, ticketId: 'TCK-' + id, eventId: 'full-chain-' + id, description, status };
+    const result = await runFullChain(input);
+    assert.equal(result.priority, priority);
+    assert.equal(result.alert.required, alert);
+    assert.equal(result.alert.sent, false);
+    assert.equal(result.auditLog.persisted, true);
+    const count = stored.size;
+    await runFullChain(input);
+    assert.equal(stored.size, count);
+  }
+});
+
+test('local intake rejects bad shapes and excessive text before downstream processing', async () => {
+  for (const value of [null, [], {}, { title: 'Only title' }, { title: {}, description: 'x' }, { title: 'x'.repeat(201), description: 'x' }]) {
+    await assert.rejects(() => runFullChain(value));
+  }
+});
+
+test('regenerating all nine workflows is deterministic and retains the export contract', () => {
+  const files = allNames.map((name) => new URL(`../n8n-workflows/${name}`, import.meta.url));
+  const original = files.map((file) => readFileSync(file, 'utf8'));
+  execFileSync(process.execPath, ['scripts/generate-n8n-workflows.mjs']);
+  assert.deepEqual(files.map((file) => readFileSync(file, 'utf8')), original);
+});

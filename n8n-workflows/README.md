@@ -44,3 +44,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:5678/webhook/ticket-intake
 ## Bản tối ưu WF07–WF09
 
 Hướng dẫn hiện hành: [WF07-09-OPTIMIZED.md](WF07-09-OPTIMIZED.md). Mỗi luồng đúng 12 node. WF09 upsert audit vào MongoDB theo eventId; cần tạo index và chọn credential trước khi kích hoạt.
+
+## Bộ 9 luồng chạy local
+
+Xem [LOCAL-SETUP.md](LOCAL-SETUP.md) để cập nhật, xử lý bản import trùng, nối webhook, cấu hình MongoDB và chạy test từ Ubuntu. WF01–WF06 đã chuẩn hóa body ở từng Webhook; các workflow chạy cùng instance qua localhost. WF07–WF09 vẫn đúng 12 node mỗi luồng.

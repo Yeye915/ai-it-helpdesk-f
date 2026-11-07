@@ -34,7 +34,7 @@
 4. Các workflow cùng một n8n instance có thể gọi nhau qua localhost:5678, kể cả cùng nằm trong một container. Khi dùng các instance khác nhau, thay URL bước 10 bằng Production Webhook URL tương ứng.
 5. Publish/kích hoạt WF09 → WF08 → WF07, thử một ticket High và một ticket Resolved trong Executions. HTTP Request giữa các luồng có timeout 30 giây và kiểm tra phản hồi cuối.
 
-WF01–WF06 được giữ nguyên. WF02 vẫn có endpoint/model riêng; cần cấu hình phù hợp với vị trí Ollama thực tế. Các payload lồng nhau cũ được phục hồi ở WF07, nhưng logic phân loại trước đó không được thay thế.
+Bộ local hiện hành đã bổ sung chuẩn hóa Webhook cho WF01–WF06. Các luồng này dùng quy tắc, không gọi Ollama trong n8n; website có thể gọi Ollama riêng. Xem [LOCAL-SETUP.md](LOCAL-SETUP.md) để nối đủ 9 luồng.
 
 ## Sinh lại JSON
 

@@ -40,7 +40,7 @@ Chỉnh cấu hình trong `.env.local`, tham khảo `.env.example`. Tạo index 
 | `OLLAMA_NUM_CTX` | 4096 | Giới hạn context 1024–32768 |
 | `OLLAMA_NUM_PREDICT` | 1024 | Giới hạn output 64–4096 token |
 
-Giới hạn đồng thời áp dụng trong từng process Next.js, không phải khóa phân tán giữa nhiều replica. Đổi model theo model thực tế đã tải; Ollama trong WF02 có cấu hình riêng và được giữ nguyên.
+Giới hạn đồng thời áp dụng trong từng process Next.js, không phải khóa phân tán giữa nhiều replica. Đổi model theo model thực tế đã tải; Bộ n8n local WF01–WF06 hiện dùng quy tắc, không gọi Ollama; Ollama của backend website được cấu hình độc lập.
 
 ## Kiểm thử
 

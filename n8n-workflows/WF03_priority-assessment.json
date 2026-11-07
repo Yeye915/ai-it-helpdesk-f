@@ -2,36 +2,54 @@
   "name": "WF03 - Priority Assessment",
   "nodes": [
     {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "parameters": {
         "httpMethod": "POST",
         "path": "priority-assessment",
         "responseMode": "responseNode",
         "options": {}
       },
+      "webhookId": "6483cdb2-edbd-4ac3-9412-16e3542c77eb",
       "id": "b65df801-dee6-4209-a47e-00dda1244723",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
       "position": [
         0,
-        0
-      ],
-      "webhookId": "6483cdb2-edbd-4ac3-9412-16e3542c77eb"
-    },
-    {
-      "parameters": {
-        "jsCode": "const t = `${$json.title} ${$json.description}`.toLowerCase();\nlet priority='Medium';\nif (/urgent|critical|production down|all users|security breach|data loss|cannot work|outage/.test(t)) priority='High';\nelse if (/when possible|minor|question|how to|request information/.test(t)) priority='Low';\nreturn [{json:{...$json,priority,workflowTrace:[...($json.workflowTrace??[]),'WF03']}}];"
-      },
-      "id": "4b5368bc-0acb-4048-9090-04b44750e1b1",
-      "name": "Process Ticket",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        240,
         0
       ]
     },
     {
+      "name": "Normalize Webhook Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\n// Recover ticket fields from a normal webhook body or legacy nested webhook bodies.\nconst allowed = ['ticketId','title','description','category','priority','assignedTeam','status','createdAt','aiReason','aiSuggestion','suggestedResponse','deduplication','alert','sla','actor','eventId','updatedAt','source','categoryRationale','aiClassification','priorityReason','assignmentQueue','assignmentReason','assignment','prioritySignals','deduplication','stepTrace'];\nconst layers = [];\nlet value = input;\nfor (let depth = 0; depth < 16; depth++) {\n  if (typeof value === 'string') value = JSON.parse(value);\n  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Ticket payload must be a JSON object');\n  layers.push(value);\n  if (!Object.prototype.hasOwnProperty.call(value, 'body')) break;\n  value = value.body;\n  if (depth === 15) throw new Error('Webhook body nesting is too deep');\n}\nconst ticket = {};\nconst trace = [];\nfor (const layer of layers.reverse()) {\n  for (const key of allowed) if (Object.prototype.hasOwnProperty.call(layer, key)) ticket[key] = layer[key];\n  if (Array.isArray(layer.workflowTrace)) for (const entry of layer.workflowTrace.slice(-32)) {\n    if (typeof entry === 'string' && entry.length <= 80 && !trace.includes(entry)) trace.push(entry);\n  }\n}\nticket.workflowTrace = trace.slice(-32);\nif (JSON.stringify(ticket).length > 65536) throw new Error('Ticket payload exceeds the workflow size limit');\nticket._workflowTime = new Date().toISOString();\n\nfor (const key of ['title', 'description']) {\n  if (typeof ticket[key] !== 'string' || !ticket[key].trim()) throw new Error(key + ' is required');\n  ticket[key] = ticket[key].trim();\n}\nif (ticket.title.length > 200 || ticket.description.length > 10000) throw new Error('Ticket text is too long');\nif (ticket.ticketId !== undefined && (typeof ticket.ticketId !== 'string' || !ticket.ticketId.trim() || ticket.ticketId.length > 100)) throw new Error('Invalid ticketId');\nif (ticket.ticketId) ticket.ticketId = ticket.ticketId.trim();\nreturn [{ json: ticket }];"
+      },
+      "id": "52c41c3a-4fe1-42ca-aeee-0fa2621a64da",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Process Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const ticket = $input.first().json;\nconst t = `${ticket.title} ${ticket.description}`.toLowerCase();\nlet priority='Medium';\nif (/urgent|critical|production down|all users|security breach|data loss|cannot work|outage|khẩn cấp|toàn công ty|toàn bộ|mất dữ liệu|không thể làm việc/.test(t)) priority='High';\nelse if (/when possible|minor|question|how to|request information|không gấp|hỏi cách/.test(t)) priority='Low';\nreturn [{json:{...ticket,priority,workflowTrace:[...(ticket.workflowTrace??[]),'WF03']}}];"
+      },
+      "id": "4b5368bc-0acb-4048-9090-04b44750e1b1",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Call Next Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "parameters": {
         "method": "POST",
         "url": "http://localhost:5678/webhook/team-assignment",
@@ -40,19 +58,19 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 10000
+          "timeout": 30000
         }
       },
       "id": "f4c8d71f-8d3b-46f6-a8d4-897dfeaa73e0",
-      "name": "Call Next Workflow",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
       "position": [
-        500,
+        780,
         0
       ]
     },
     {
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}",
@@ -60,18 +78,26 @@
           "responseCode": 200
         }
       },
-      "id": "16cfe1ae-a9d9-4891-bfa7-8a29a36dc46f",
-      "name": "Respond",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
+      "id": "a708d59c-3de9-4dc2-ae3f-d4b32be786ed",
       "position": [
-        760,
+        1040,
         0
       ]
     }
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Webhook Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Webhook Data": {
       "main": [
         [
           {
@@ -97,7 +123,7 @@
       "main": [
         [
           {
-            "node": "Respond",
+            "node": "Respond to Webhook",
             "type": "main",
             "index": 0
           }
@@ -110,9 +136,9 @@
     "executionOrder": "v1",
     "saveManualExecutions": true
   },
-  "versionId": "35a60fd9-34a9-4f74-baa8-b4b9ac34756e",
+  "versionId": "ae0338df-ba7c-4e9b-a100-c92708bc2f09",
   "meta": {
-    "templateCredsSetupCompleted": true
+    "templateCredsSetupCompleted": false
   },
   "tags": [
     {

@@ -112,3 +112,5 @@ File `.env.local` trong bản gốc có chứa thông tin kết nối cơ sở d
 ## Tối ưu hóa backend và WF07–WF09
 
 Xem [chi tiết backend](docs/BACKEND-OPTIMIZATION.md) và [12 bước mỗi workflow](n8n-workflows/WF07-09-OPTIMIZED.md). Chạy `npm run db:indexes` trên đúng database trước khi bật WF09 mới; import lại ba workflow và chọn credential MongoDB. API tiếp tục yêu cầu phiên đăng nhập. GET `/api/tickets` giữ toàn bộ danh sách cho dashboard hiện tại; thêm `?page=1` để dùng phân trang và thống kê.
+
+Hướng dẫn chạy đủ 9 workflow trên n8n local: [n8n-workflows/LOCAL-SETUP.md](n8n-workflows/LOCAL-SETUP.md).
