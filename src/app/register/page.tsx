@@ -1,3 +1,4 @@
+//Đăng kí
 import type { Metadata } from "next";
 import AuthForm from "../../components/AuthForm";
 
